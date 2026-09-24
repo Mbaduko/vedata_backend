@@ -1,0 +1,320 @@
+// Vedata — Prisma Schema
+// Full data model for veterinary/animal health data management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Zone Hierarchy ────────────────────────────────────────────────
+
+model Zone {
+  id                          String   @id @default(cuid())
+  name                        String
+  label                       String   @default("Zone")
+  parentZoneId                String?
+  leadVetId                   String?
+  technicianGracePeriodHours  Int      @default(24)
+  inviteExpiryHours           Int      @default(168)
+  status                      String   @default("active") // active | archived
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  // Relations
+  parentZone                  Zone?    @relation("ZoneHierarchy", fields: [parentZoneId], references: [id])
+  childZones                  Zone[]   @relation("ZoneHierarchy")
+  leadVet                     User?    @relation("ZoneLeadVet", fields: [leadVetId], references: [id])
+  animals                     Animal[]
+  owners                      Owner[]
+  userZoneRoles               UserZoneRole[]
+  invitations                 Invitation[]
+  auditLogEntries             AuditLog[]
+
+  @@index([parentZoneId])
+  @@index([leadVetId])
+}
+
+// ─── Users & RBAC ─────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String   // hashed
+  role      String   @default("technician") // superadmin | vet | technician
+  status    String   @default("active") // active | suspended
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  zoneRoles                   UserZoneRole[]
+  leadZones                   Zone[]         @relation("ZoneLeadVet")
+  enteredAnimals              Animal[]
+  administeredVaccinations    Vaccination[]
+  sentInvitations             Invitation[]
+  auditLog                    AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "animal.create", "zone.move"
+  description String?
+  createdAt   DateTime @default(now())
+
+  // Relations
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserZoneRole {
+  id          String    @id @default(cuid())
+  userId      String
+  zoneId      String
+  role        String    // vet | technician
+  isLead      Boolean   @default(false)
+  contractStart DateTime?
+  contractEnd   DateTime?
+  status      String    @default("active") // active | suspended
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  zone Zone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, zoneId])
+  @@index([userId])
+  @@index([zoneId])
+}
+
+// ─── Animal Registry ──────────────────────────────────────────────
+
+model Species {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  breeds    Breed[]
+  animals   Animal[]
+  diseases  DiseaseSpecies[]
+}
+
+model Breed {
+  id        String   @id @default(cuid())
+  name      String
+  speciesId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  animals Animal[]
+
+  @@index([speciesId])
+}
+
+model Owner {
+  id        String   @id @default(cuid())
+  nid       String   @unique // National ID — unique system-wide
+  name      String
+  phone     String
+  email     String?
+  address   String?
+  zoneId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  zone    Zone     @relation(fields: [zoneId], references: [id])
+  animals Animal[]
+
+  @@index([nid])
+  @@index([zoneId])
+}
+
+model Animal {
+  id                String    @id @default(cuid())
+  tagNumber         String    @unique // Unique system-wide
+  speciesId         String
+  breedId           String?
+  sex               String    // male | female
+  dateOfBirth       DateTime
+  ownerId           String
+  zoneId            String
+  healthStatus      String    @default("healthy") // healthy | sick | under_treatment | deceased
+  deceasedReason    String?
+  deceasedDate      DateTime?
+  registeredAt      DateTime  @default(now())
+  enteredByUserId   String
+  editableUntil     DateTime? // grace period cutoff for technicians
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  species       Species     @relation(fields: [speciesId], references: [id])
+  breed         Breed?      @relation(fields: [breedId], references: [id])
+  owner         Owner       @relation(fields: [ownerId], references: [id])
+  zone          Zone        @relation(fields: [zoneId], references: [id])
+  enteredBy     User        @relation(fields: [enteredByUserId], references: [id])
+  vaccinations  Vaccination[]
+
+  @@index([tagNumber])
+  @@index([speciesId])
+  @@index([ownerId])
+  @@index([zoneId])
+  @@index([healthStatus])
+  @@index([enteredByUserId])
+}
+
+// ─── Vaccination System ───────────────────────────────────────────
+
+model Disease {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  species  DiseaseSpecies[]
+  vaccines Vaccine[]
+}
+
+model DiseaseSpecies {
+  diseaseId String
+  speciesId String
+
+  disease Disease @relation(fields: [diseaseId], references: [id], onDelete: Cascade)
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+
+  @@id([diseaseId, speciesId])
+}
+
+model Vaccine {
+  id           String   @id @default(cuid())
+  name         String
+  diseaseId    String
+  manufacturer String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relationsc
+  disease      Disease           @relation(fields: [diseaseId], references: [id])
+  schedules    VaccineSchedule[]
+  vaccinations Vaccination[]
+
+  @@index([diseaseId])
+}
+
+model VaccineSchedule {
+  id                        String  @id @default(cuid())
+  vaccineId                 String
+  doseNumber                Int
+  intervalDaysFromPrevious  Int     @default(0)
+  isRecurring               Boolean @default(false)
+  recurrenceIntervalDays    Int?
+
+  // Relations
+  vaccine Vaccine @relation(fields: [vaccineId], references: [id], onDelete: Cascade)
+
+  @@unique([vaccineId, doseNumber])
+  @@index([vaccineId])
+}
+
+model Vaccination {
+  id                    String    @id @default(cuid())
+  animalId              String
+  vaccineId             String
+  doseNumber            Int
+  dateAdministered      DateTime
+  batchNumber           String
+  administeredByUserId  String
+  nextDueDate           DateTime?
+  photoEvidenceUrl      String?
+  gpsLat                Float?
+  gpsLng                Float?
+  editableUntil         DateTime? // grace period for technicians
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  animal          Animal @relation(fields: [animalId], references: [id])
+  vaccine         Vaccine @relation(fields: [vaccineId], references: [id])
+  administeredBy  User   @relation(fields: [administeredByUserId], references: [id])
+
+  @@index([animalId])
+  @@index([vaccineId])
+  @@index([administeredByUserId])
+  @@index([nextDueDate])
+}
+
+// ─── Invitations ──────────────────────────────────────────────────
+
+model Invitation {
+  id              String   @id @default(cuid())
+  email           String
+  invitedByUserId String
+  zoneId          String
+  status          String   @default("pending") // pending | accepted | expired
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  invitedBy User @relation(fields: [invitedByUserId], references: [id])
+  zone      Zone @relation(fields: [zoneId], references: [id])
+
+  @@index([email])
+  @@index([zoneId])
+  @@index([status])
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // e.g. "zone.create", "animal.update", "vaccination.record"
+  entity    String   // e.g. "zone", "animal", "vaccination"
+  entityId  String
+  zoneId    String?
+  metadata  Json?    // extra context (old/new values, etc.)
+  timestamp DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+  zone Zone? @relation(fields: [zoneId], references: [id])
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([zoneId])
+  @@index([timestamp])
+}
