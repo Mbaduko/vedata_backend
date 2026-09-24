@@ -127,3 +127,28 @@ export const authorizeZone = (req: Request, res: Response, next: NextFunction): 
 
   next();
 };
+
+/**
+ * Require specific permission(s) to access a route.
+ * Must be used after authenticate.
+ */
+export const requirePermission = (...permissions: string[]) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.user) {
+      next(new AppError('Not authenticated.', 401));
+      return;
+    }
+
+    // Import permission checker dynamically to avoid circular dependency
+    const { hasAnyPermission } = require('../utils/permissions');
+    
+    const hasAccess = hasAnyPermission(authReq.user, permissions);
+    if (!hasAccess) {
+      next(new AppError('You do not have permission to perform this action.', 403));
+      return;
+    }
+
+    next();
+  };
+};

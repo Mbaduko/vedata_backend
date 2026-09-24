@@ -132,13 +132,27 @@ export const logout = catchAsync(async (req: Request, res: Response) => {
 
 export const getMe = catchAsync(async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
+  const { getUserPermissions, getDashboardPermissions } = require('../utils/permissions');
+  
+  const permissions = getUserPermissions(authReq.user);
+  const dashboardPerms = getDashboardPermissions(authReq.user);
+
   sendResponse(res, {
     data: {
       id: authReq.user.id,
       name: authReq.user.name,
       email: authReq.user.email,
       role: authReq.user.role,
-      zoneRoles: authReq.user.zoneRoles,
+      zoneRoles: authReq.user.zoneRoles.map((zr) => ({
+        id: zr.id,
+        zoneId: zr.zoneId,
+        zoneName: zr.zone.name,
+        role: zr.role,
+        isLead: zr.isLead,
+        status: zr.status,
+      })),
+      permissions,
+      dashboardPermissions: dashboardPerms,
     },
   });
 });

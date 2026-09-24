@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import authRoutes from './auth.routes';
+import dashboardRoutes from './dashboard.routes';
 import zoneRoutes from './zone.routes';
 import userRoutes from './user.routes';
 import animalRoutes from './animal.routes';
@@ -12,6 +13,7 @@ import auditRoutes from './audit.routes';
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/dashboard', dashboardRoutes);
 router.use('/zones', zoneRoutes);
 router.use('/users', userRoutes);
 router.use('/animals', animalRoutes);
